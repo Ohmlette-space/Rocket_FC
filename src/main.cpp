@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <Adafruit_LSM6DSOX.h>
 
-Adafruit_LSM6DSOX sox;
+Adafruit_LSM6DSOX sox; //
 
 void setup() {
     Serial.begin(115200);
