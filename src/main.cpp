@@ -56,14 +56,14 @@ void loop() {
     delay(100);
 
     while(ss.available() > 0){
-          gps.encode(ss.read());
+        byte gpsData = ss.read();
+        gps.encode(gpsData);
         if (gps.location.isUpdated()){
             Serial.print("Latitude= "); 
             Serial.print(gps.location.lat(), 6);
             Serial.print(" Longitude= "); 
             Serial.println(gps.location.lng(), 6);
     }
-        byte gpsData = ss.read();
         Serial.write(gpsData);
 
         Serial.print("Latitude= "); 
