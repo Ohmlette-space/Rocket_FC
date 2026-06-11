@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <Adafruit_LSM6DSOX.h>
-#include <SoftwareSerial.h> 
 #include <TinyGPSPlus.h>
 #include <Adafruit_BMP280.h>
 #include <Adafruit_Sensor.h>
@@ -13,16 +12,19 @@ Adafruit_LSM6DSOX sox;
 Adafruit_LSM6DSOX sox_2; 
 Adafruit_BMP280 bmp;
 Adafruit_FRAM_I2C fram;
-SoftwareSerial ss(16, 17);
+HardwareSerial GPSSerial(1);
 TinyGPSPlus gps;
 
-int rstPin = 36;
-int logPin = 13;
+int rstPin = 4;
+int logPin = 3;
+int recPin = 7;
 
-int rst = false;
-int log_ = false;
+bool rst = false;
+bool log_ = false;
+bool rec_ = false;
 
-int indexFRAM = 0;
+uint32_t indexFRAM = 0;
+
 
 void writeByte(uint8_t value) {
     fram.write(indexFRAM, &value, 1);
@@ -31,7 +33,7 @@ void writeByte(uint8_t value) {
 
 void writeBytes(uint8_t *values, size_t len) {
     fram.write(indexFRAM, values, len);
-    indexFRAM ++;
+    indexFRAM += len;
 }
 
 void writeFloat(float value) {
@@ -98,33 +100,29 @@ void readSensorsData(uint16_t addr, float *g_x_a, float *g_y_a, float *g_z_a, fl
 
 void setup() {
     Serial.begin(115200);
-    ss.begin(9600);
-    while (!Serial) delay(10);
+    delay(2000);
+    Serial.println("BOOT");
+
+    GPSSerial.begin(9600, SERIAL_8N1, 1, 0);
 
     if (!bmp.begin(0x76)) {
-        Serial.println("Failed to find BME280 chip");
-        while (1)
-        delay(10);
+        Serial.println("BMP280 init failed!");
+    } else {
+        Serial.println("BMP280 OK");
     }
 
-    if (!sox.begin_I2C(0x6A)) {
-        Serial.println("Failed to find LSM6DSOX chip");
-        while (1) delay(10);
-    }
+    sox.begin_I2C(0x6A);
+    delay(50);
 
-    if (!sox_2.begin_I2C(0x6B)) {
-        Serial.println("Failed to find LSM6DSOX 2 chip");
-        while (1) delay(10);
-    }
+    sox_2.begin_I2C(0x6B);
+    delay(50);
 
-    if (!fram.begin(0x50))
-    {
-        Serial.println("Failed to find FRAM chip");
-        while (1) delay(10);
-    }
+    fram.begin(0x50);
+    delay(50);
     
     pinMode(rstPin, INPUT);
     pinMode(logPin, INPUT);
+    pinMode(recPin, INPUT);
 
     sox.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
     sox.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
@@ -152,19 +150,6 @@ void clearFRAM() {
 }
 
 void logFRAM() {
-    /*
-    for (uint16_t addr = 0; addr < C; addr++) {
-    uint8_t b;
-    uint8_t buffer[1];
-
-    fram.read(addr, buffer, 1);
-    memcpy((void *)&b, buffer, 1);
-    Serial.print(addr, HEX);
-    Serial.print(": ");
-    Serial.println(b);
-    }
-    */
-
     float g_x_a, g_y_a, g_z_a, a_x_a, a_y_a, a_z_a, g_x_b, g_y_b, g_z_b, a_x_b, a_y_b, a_z_b, temp, pressure;
 
     for (int i = 0; i < FRAM_SIZE; i += 56)
@@ -172,15 +157,15 @@ void logFRAM() {
         readSensorsData(i, &g_x_a, &g_y_a, &g_z_a, &a_x_a, &a_y_a, &a_z_a,
             &g_x_b, &g_y_b, &g_z_b, &a_x_b, &a_y_b, &a_z_b, &temp, &pressure);
     }
-    
-
     Serial.println("Done.");
 }
 
 void loop() {
-
     rst = digitalRead(rstPin);
     log_ = digitalRead(logPin);
+    if (recPin != 1) {
+        rec_ = digitalRead(recPin);
+    }
 
     if (rst == 1)
     {
@@ -191,17 +176,18 @@ void loop() {
         logFRAM();
     }
     
-
     sensors_event_t accel;
     sensors_event_t gyro;
     sensors_event_t temp;
-    sox.getEvent(&gyro, &accel, &temp);
+    //sox.getEvent(&gyro, &accel, &temp);
 
     sensors_event_t accel_2;
     sensors_event_t gyro_2;
     sensors_event_t temp_2;
-    sox_2.getEvent(&gyro_2, &accel_2, &temp_2);
+    //sox_2.getEvent(&gyro_2, &accel_2, &temp_2);
+    //sox.getEvent(&gyro_2, &accel_2, &temp_2);
 
+    /*
     Serial.print("Pressure = ");
     Serial.print(bmp.readPressure() / 100.0F);
     Serial.println(" hPa");
@@ -215,32 +201,34 @@ void loop() {
     Serial.print("[2] Gyro --- X: " + String(gyro_2.gyro.x) + " Y: " + String(gyro_2.gyro.y) + " Z: " + String(gyro_2.gyro.z));
     Serial.print("  |  ");
     Serial.println("Accel -- X: " + String(accel_2.acceleration.x) + " Y: " + String(accel_2.acceleration.y) + " Z: " + String(accel_2.acceleration.z));
+    
 
-    writeSensorsData(gyro.gyro.x, gyro.gyro.y, gyro.gyro.z, accel.acceleration.x, accel.acceleration.y, accel.acceleration.z,
-        gyro_2.gyro.x, gyro_2.gyro.y, gyro_2.gyro.z, accel_2.acceleration.x, accel_2.acceleration.y, accel_2.acceleration.z,
-        temp.temperature, bmp.readPressure());
+    if (rec_)
+    {
+        writeSensorsData(gyro.gyro.x, gyro.gyro.y, gyro.gyro.z, accel.acceleration.x, accel.acceleration.y, accel.acceleration.z,
+            gyro_2.gyro.x, gyro_2.gyro.y, gyro_2.gyro.z, accel_2.acceleration.x, accel_2.acceleration.y, accel_2.acceleration.z,
+            temp.temperature, bmp.readPressure());
+    }
+    */
 
     delay(100);
+    
+    while (GPSSerial.available() > 0) {
+        uint8_t gpsData = GPSSerial.read();
 
-    while(ss.available() > 0){
-        byte gpsData = ss.read();
         gps.encode(gpsData);
-        if (gps.location.isUpdated()){
-            Serial.print("Latitude= "); 
-            Serial.print(gps.location.lat(), 6);
-            Serial.print(" Longitude= "); 
-            Serial.println(gps.location.lng(), 6);
-    }
-        Serial.write(gpsData);
 
-        Serial.print("Latitude= "); 
-        Serial.print(gps.location.lat(), 6);
-        Serial.print(" Longitude= "); 
-        Serial.println(gps.location.lng(), 6);
+        if (gps.location.isUpdated()) {
+            Serial.print("Latitude = ");
+            Serial.print(gps.location.lat(), 6);
+
+            Serial.print("  Longitude = ");
+            Serial.println(gps.location.lng(), 6);
+        }
     }
 
     float b;
-    readFloat(0x00, &b);
-    Serial.print("Read back float value: ");
-    Serial.println(b);
+    //readFloat(0x00, &b);
+    //Serial.print("Read back float value: ");
+    //Serial.println(b);
 }
